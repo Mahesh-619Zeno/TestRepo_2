@@ -8,7 +8,7 @@ public class FactorialCalculator {
         int number = scanner.nextInt();
         
         if (number < 0) {
-            System.out.println("Factorial is not defined for negative numbers.");
+            System.out.println("Factorial is not defined for negative number.");
         } else {
             long factorial = 1;
             for (int i = 1; i <= number; i++) {
