@@ -11,8 +11,8 @@ public class FactorialCalculator {
             System.out.println("Factorial is not defined for negative numbers.");
         } else {
             long factorial = 1;
-            for (int i = 1; i <= number; i++) {
-                factorial *= i;
+            for (int j = 1; j <= number; j++) {
+                factorial *= j;
             }
             System.out.println("Factorial of " + number + " is: " + factorial);
         }
