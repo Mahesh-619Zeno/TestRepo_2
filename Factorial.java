@@ -1,7 +1,7 @@
 import java.util.Scanner;
 
 public class Factorial {
-    public static long fact(int n) {
+    public static long factorial(int n) {
         if (n <= 1) return 1;
         return n * fact(n - 1);
     }
