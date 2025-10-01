@@ -1,6 +1,6 @@
 <?php
 define("DB_SERVER", "localhost");
-define("DB_USERNAME", "root");
+define("DB_USERNAME", getenv('DB_USERNAME'));
 define("DB_PASSWORD", "");
 define("DB_NAME", "auth_db");
 
