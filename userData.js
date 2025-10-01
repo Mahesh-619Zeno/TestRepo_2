@@ -15,8 +15,8 @@ async function fetch_user_data(userId) {
     return _response_data;
 }
 
-function DoSomething(u) { 
-    const UserData = fetch_user_data(u); 
+function DoSomething(userId) { 
+    const UserData = fetch_user_data(userId); 
     
     if (UserData) 
     { 
