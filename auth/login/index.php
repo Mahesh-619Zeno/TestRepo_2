@@ -1,5 +1,8 @@
 <?php
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 
 // --- Configuration & Initialization ---
 
@@ -10,7 +13,7 @@ function get_csrf_token() {
     }
     return $_SESSION['csrf_token'];
 }
-$csrf_token = get_csrf_token();
+$csrf_token = htmlspecialchars(get_csrf_token(), ENT_QUOTES, 'UTF-8');
 
 // Function to handle JSON response output
 function json_response($success, $title, $message, $redirect = null) {
@@ -127,7 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === "POST") {
                         <h2 class="text-center mb-4">Login</h2>
                         <form id="loginForm" method="POST">
                             <!-- CSRF Token -->
-                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8') ?>">
 
                             <div class="mb-3">
                                 <label for="username" class="form-label">Username</label>
