@@ -1,104 +1,111 @@
 <?php
-session_start();
+declare(strict_types=1);
+session_start([
+    'cookie_httponly' => true,
+    'cookie_secure'   => isset($_SERVER['HTTPS']),
+    'use_strict_mode' => true,
+    'cookie_samesite' => 'Strict'
+]);
 
-// --- Configuration & Initialization ---
+// --- Security Headers ---
+header('X-Frame-Options: DENY');
+header('X-XSS-Protection: 1; mode=block');
+header('X-Content-Type-Options: nosniff');
 
-// Function to generate and retrieve CSRF token
-function get_csrf_token() {
-    if (empty($_SESSION['csrf_token'])) {
-        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-    }
+// --- Include database configuration ---
+require "../config.php";
+
+// --- Helper Functions ---
+
+// Generate CSRF token
+function generate_csrf_token(): string {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
     return $_SESSION['csrf_token'];
 }
-$csrf_token = get_csrf_token();
 
-// Function to handle JSON response output
-function json_response($success, $title, $message, $redirect = null) {
-    header('Content-Type: application/json');
-    echo json_encode([
-        'success' => $success,
-        'title' => $title,
-        'message' => $message,
-        'redirect' => $redirect
-    ]);
+// Verify CSRF token
+function verify_csrf_token(string $token): bool {
+    if (empty($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $token)) {
+        return false;
+    }
+    unset($_SESSION['csrf_token']); // prevent reuse
+    return true;
+}
+
+// Unified JSON response
+function json_response(bool $success, string $title, string $message, ?string $redirect = null): never {
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(compact('success', 'title', 'message', 'redirect'), JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-// Redirect if already logged in
-if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
-    $role = $_SESSION['user']['role'];
+// --- Redirect if already logged in ---
+if (!empty($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
+    $role = $_SESSION['user']['role'] ?? 'user';
     $location = ($role === 'admin') ? '../admin/' : '../';
     header("Location: $location");
     exit;
 }
 
-// Include database configuration (assuming it contains the Database class)
-include "../config.php";
-// $db = new Database(); // Assuming Database class is available
+// --- Generate CSRF token for the form ---
+$csrf_token = generate_csrf_token();
 
-// --- POST Request Handling ---
+// --- Handle POST Request ---
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-if ($_SERVER['REQUEST_METHOD'] === "POST") {
-    
-    // 1. CSRF Token Validation
-    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
-        json_response(false, '❌ Xato!', 'Xavfsizlik tokeni (CSRF) xatosi.', null);
+    // Reject non-AJAX requests (optional but good)
+    $is_ajax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+    if (!$is_ajax) {
+        header('HTTP/1.1 403 Forbidden');
+        exit('Direct POST requests not allowed.');
     }
-    
-    // Invalidate the token immediately after successful check to prevent reuse
-    unset($_SESSION['csrf_token']);
-    
-    // 2. Input Sanitization and Retrieval
+
+    // 1. Validate CSRF token
+    if (!verify_csrf_token($_POST['csrf_token'] ?? '')) {
+        json_response(false, '❌ Xato!', 'Xavfsizlik tokeni (CSRF) xatosi.');
+    }
+
+    // 2. Sanitize and validate input
     $username = strtolower(trim($_POST['username'] ?? ''));
     $password = $_POST['password'] ?? '';
 
-    // 3. Basic Input Validation
-    if (empty($username) || empty($password)) {
-        json_response(false, '⚠️ Diqqat!', "Iltimos, login va parol maydonlarini to‘ldiring!", null);
+    if ($username === '' || $password === '') {
+        json_response(false, '⚠️ Diqqat!', 'Iltimos, login va parol maydonlarini to‘ldiring!');
     }
 
-    // 4. Database Interaction
     try {
-        // NOTE: $db instantiation depends on config.php contents
-        $db = new Database(); 
-        $user_data = $db->select('users', '*', 'username = ?', [$username], 's');
-        
-        if (empty($user_data)) {
-            json_response(false, '❌ Foydalanuvchi topilmadi!', "Bunday foydalanuvchi topilmadi.");
+        $db = new Database();
+
+        // 3. Fetch user data securely
+        $user_data = $db->select('users', 'id, name, username, password, role', 'username = ?', [$username], 's');
+
+        // Unified error for user-not-found or password mismatch
+        if (empty($user_data) || !password_verify($password, $user_data[0]['password'])) {
+            json_response(false, '❌ Xato!', 'Login yoki parol noto‘g‘ri.');
         }
-        
+
         $user = $user_data[0];
-        $hashedPassword = $user['password'];
 
-        if (password_verify($password, $hashedPassword)) {
-            // 5. Successful Login
-            $_SESSION['loggedin'] = true;
-            $_SESSION['user'] = [
-                'id' => $user['id'],
-                'name' => $user['name'],
-                'username' => $user['username'],
-                'role' => $user['role'],
-            ];
+        // 4. Successful login — regenerate session
+        session_regenerate_id(true);
+        $_SESSION['loggedin'] = true;
+        $_SESSION['user'] = [
+            'id' => (int)$user['id'],
+            'name' => $user['name'],
+            'username' => $user['username'],
+            'role' => $user['role'],
+        ];
 
-            $redirect_url = ($user['role'] === 'admin') ? '../admin/' : '../';
-            
-            // 6. Security Header (optional, but good practice)
-            session_regenerate_id(true);
+        $redirect_url = ($user['role'] === 'admin') ? '../admin/' : '../';
 
-            json_response(true, '✅ Muvaffaqiyat!', 'Tizimga kirdingiz!', $redirect_url);
-        } else {
-            // 7. Password Mismatch
-            json_response(false, '❌ Xato parol!', 'Noto‘g‘ri parol, qayta urinib ko‘ring.');
-        }
+        json_response(true, '✅ Muvaffaqiyat!', 'Tizimga kirdingiz!', $redirect_url);
 
-    } catch (Exception $e) {
-        // 8. Database Error Handling
-        error_log("Database error during login: " . $e->getMessage());
+    } catch (Throwable $e) {
+        error_log("Login error: " . $e->getMessage());
         json_response(false, '❌ Xato!', 'Tizimda xatolik yuz berdi. Iltimos, keyinroq urinib ko‘ring.');
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 
@@ -114,7 +121,10 @@ if ($_SERVER['REQUEST_METHOD'] === "POST") {
             border-radius: 1rem;
             border: none;
         }
-        .v-100 { min-height: 100vh; }
+
+        .v-100 {
+            min-height: 100vh;
+        }
     </style>
 </head>
 
@@ -125,26 +135,28 @@ if ($_SERVER['REQUEST_METHOD'] === "POST") {
                 <div class="card shadow">
                     <div class="card-body p-4">
                         <h2 class="text-center mb-4">Login</h2>
-                        <form id="loginForm" method="POST">
+                        <form id="loginForm" method="POST" autocomplete="off">
                             <!-- CSRF Token -->
                             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
 
                             <div class="mb-3">
                                 <label for="username" class="form-label">Username</label>
                                 <input type="text" class="form-control" name="username" id="username"
-                                    placeholder="Enter username" required />
+                                    placeholder="Enter username" required autocomplete="username" />
                             </div>
+
                             <div class="mb-3 position-relative">
                                 <label for="password" class="form-label">Password</label>
                                 <div class="input-group">
                                     <input type="password" id="password" class="form-control" name="password"
-                                        placeholder="Enter password" required />
+                                        placeholder="Enter password" required autocomplete="current-password" />
                                     <button class="btn btn-outline-secondary" type="button"
                                         onclick="togglePassword('password')" aria-label="Show/Hide Password">
                                         <i class="fas fa-eye"></i>
                                     </button>
                                 </div>
                             </div>
+
                             <button type="submit" class="btn btn-primary w-100">Login</button>
                         </form>
                         <p class="text-center mt-3">Don't have an account? <a href="../signup/">Sign Up</a></p>
@@ -157,18 +169,12 @@ if ($_SERVER['REQUEST_METHOD'] === "POST") {
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        function togglePassword(fieldId) {
-            const input = document.getElementById(fieldId);
-            const button = input.nextElementSibling.querySelector('button'); // Adjusted selector
-            const icon = button.querySelector('i');
-
-            if (input.type === 'password') {
-                input.type = 'text';
-                icon.classList.replace('fa-eye', 'fa-eye-slash');
-            } else {
-                input.type = 'password';
-                icon.classList.replace('fa-eye-slash', 'fa-eye');
-            }
+        function togglePassword(id) {
+            const input = document.getElementById(id);
+            const icon = input.parentElement.querySelector('i');
+            input.type = input.type === 'password' ? 'text' : 'password';
+            icon.classList.toggle('fa-eye');
+            icon.classList.toggle('fa-eye-slash');
         }
 
         document.getElementById('loginForm').addEventListener('submit', async function (e) {
@@ -176,8 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] === "POST") {
 
             const form = this;
             const submitButton = form.querySelector('button[type="submit"]');
-            
-            // Basic Client-side check
+
             if (!form.username.value || !form.password.value) {
                 Swal.fire({
                     icon: 'warning',
@@ -194,15 +199,11 @@ if ($_SERVER['REQUEST_METHOD'] === "POST") {
 
                 const response = await fetch('', {
                     method: 'POST',
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
                     body: formData
                 });
 
-                if (!response.ok) {
-                    throw new Error('Server returned an unexpected status.');
-                }
+                if (!response.ok) throw new Error('Server error');
 
                 const result = await response.json();
 
@@ -211,27 +212,20 @@ if ($_SERVER['REQUEST_METHOD'] === "POST") {
                         icon: 'success',
                         title: result.title,
                         text: result.message,
-                        confirmButtonText: 'OK',
                         showConfirmButton: false,
                         timer: 1500
                     });
-                    if (result.redirect) {
-                        window.location.href = result.redirect;
-                    }
+                    if (result.redirect) window.location.href = result.redirect;
                 } else {
-                    Swal.fire({
-                        icon: 'error',
-                        title: result.title,
-                        text: result.message
-                    });
+                    Swal.fire({ icon: 'error', title: result.title, text: result.message });
                 }
-            } catch (error) {
+            } catch (err) {
+                console.error(err);
                 Swal.fire({
                     icon: 'error',
                     title: '❌ Tarmoq xatosi',
                     text: 'Server bilan bog‘lanishda muammo yuz berdi.'
                 });
-                console.error('Fetch error:', error);
             } finally {
                 submitButton.disabled = false;
             }
