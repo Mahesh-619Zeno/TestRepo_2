@@ -2,7 +2,7 @@
 return array(
     'name'        => 'Iqbolshoh Ilhomjonov',
     'username'    => 'iqbolshoh',
-    'password'    => 'f46b3a2625246a83de76a47c15a90066',
+    'password'    => getenv('USER_PASSWORD_HASH'),
     'email'       => 'iilhomjonov777@gmail.com',
     'phone'       => '+998 99 779 93 33',
     'address'     => 'Samarkand, Uzbekistan',
